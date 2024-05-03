@@ -4,6 +4,10 @@
 Python Job Submit plugin for Slurm
 ==================================
 
+Added support for Slurm-22 (and possibly onward).
+
+Added support for Python3.9 (and possibly onward).
+
 Similar the now built-in plugin for Lua,
 this plugin allows the use of Python scripts to control job submission.
 

@@ -17,6 +17,9 @@
  *  with this program; if not, write to the Free Software Foundation, Inc.,
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
 \*****************************************************************************/
+#ifdef DEBUG
+#include <sys/syscall.h>
+#endif
 
 #include <Python.h>
 
@@ -46,7 +49,7 @@ static pthread_mutex_t python_lock = PTHREAD_MUTEX_INITIALIZER;
  * Function to register into Python namespace to allow the plugin writer to
  * return information to the user running sbatch.
  */
-static PyObject *slurm_user_msg(PyObject *self, PyObject *arg)
+static PyObject *py_slurm_user_msg(PyObject *self, PyObject *arg)
 {
 	const char *msg = PyUnicode_AsUTF8(arg);
 	char *tmp = NULL;
@@ -68,10 +71,10 @@ static PyObject *slurm_user_msg(PyObject *self, PyObject *arg)
  * Function to register into Python namespace to allow the plugin writer to
  * write an info message into the log
  */
-static PyObject *slurm_info(PyObject *self, PyObject *arg)
+static PyObject *py_slurm_info(PyObject *self, PyObject *arg)
 {
 	PyObject *str = PyObject_Str(arg);
-	info("job_submit_python: %s", PyUnicode_AsUTF8(str));
+	info("job_submit/python: %s", PyUnicode_AsUTF8(str));
 	Py_DECREF(str);
 	Py_RETURN_NONE;
 }
@@ -80,10 +83,10 @@ static PyObject *slurm_info(PyObject *self, PyObject *arg)
  * Function to register into Python namespace to allow the plugin writer to
  * write an error message into the log
  */
-static PyObject *slurm_error(PyObject *self, PyObject *arg)
+static PyObject *py_slurm_error(PyObject *self, PyObject *arg)
 {
 	PyObject *str = PyObject_Str(arg);
-	error("job_submit_python: %s", PyUnicode_AsUTF8(str));
+	error("job_submit/python: %s", PyUnicode_AsUTF8(str));
 	Py_DECREF(str);
 	Py_RETURN_NONE;
 }
@@ -92,9 +95,9 @@ static PyObject *slurm_error(PyObject *self, PyObject *arg)
  * Register table of Python function name to C function
  */
 static PyMethodDef SlurmMethods[] = {
-		{"user_msg", slurm_user_msg, METH_O, ""},
-		{"info", slurm_info, METH_O, ""},
-		{"error", slurm_error, METH_O, ""},
+		{"user_msg", py_slurm_user_msg, METH_O, ""},
+		{"info", py_slurm_info, METH_O, ""},
+		{"error", py_slurm_error, METH_O, ""},
 		{NULL, NULL, 0, NULL}};
 
 /*
@@ -114,8 +117,12 @@ static PyObject *PyInit_slurm()
 /*
  * The plugin's entry point
  */
-int init(void)
+int py_init(void)
 {
+#ifdef DEBUG
+	info("[py_init] pid=%ld\n", syscall(__NR_gettid));
+#endif
+
 	// Create the slurm module and put it in the path
 	PyImport_AppendInittab("slurm", &PyInit_slurm);
 	Py_Initialize();
@@ -125,6 +132,19 @@ int init(void)
 	PyObject *script_path = PyUnicode_FromString(DEFAULT_SCRIPT_DIR);
 	PyList_Append(sysPath, script_path);
 	Py_DECREF(script_path);
+#ifdef DEBUG
+	info("[py_init] RETURN");
+#endif
+
+	return SLURM_SUCCESS;
+}
+
+int init(void)
+{
+#ifdef DEBUG
+	info("[init] pid=%ld\n", syscall(__NR_gettid));
+#endif
+	slurm_mutex_init(&python_lock);
 
 	return SLURM_SUCCESS;
 }
@@ -132,9 +152,20 @@ int init(void)
 /*
  * The plugin's cleanup function
  */
+int py_fini(void)
+{
+#ifdef DEBUG
+	info("[py_fini] pid=%ld\n", syscall(__NR_gettid));
+#endif
+	Py_Finalize();
+	return SLURM_SUCCESS;
+}
+
 int fini(void)
 {
-	Py_Finalize();
+#ifdef DEBUG
+	info("[fini] pid=%ld\n", syscall(__NR_gettid));
+#endif
 	return SLURM_SUCCESS;
 }
 
@@ -165,8 +196,8 @@ void print_python_error()
 
 		PyObject *pFormattedTbStr = PyObject_Str(pFormattedTb);
 
-		error("job_submit_python: %s", PyUnicode_AsUTF8(pFormattedTbStr));
-		error("job_submit_python: %s: %s", PyUnicode_AsUTF8(ptype), PyUnicode_AsUTF8(pvalue));
+		error("job_submit/python: %s", PyUnicode_AsUTF8(pFormattedTbStr));
+		error("job_submit/python: %s: %s", PyUnicode_AsUTF8(ptype), PyUnicode_AsUTF8(pvalue));
 
 		Py_DECREF(pFormattedTbStr);
 		Py_XDECREF(pvalue);
@@ -188,7 +219,7 @@ void insert_object(PyObject *dict, char *name, PyObject *obj)
 	}
 	else
 	{
-		error("job_submit_python: Could not convert job description entry %s", name);
+		error("job_submit/python: Could not convert job description entry %s", name);
 		print_python_error();
 	}
 }
@@ -314,6 +345,9 @@ PyObject *char_star_star_to_python_dict(uint32_t num_strings, char **str_list)
  */
 PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 {
+#ifdef DEBUG
+	info("[create_job_desc_dict] %s\n", "ENTRY");
+#endif
 	PyObject *pJobDesc = PyDict_New();
 
 	insert_char_star(job_desc, pJobDesc, account);
@@ -328,8 +362,6 @@ PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 	insert_time_t(job_desc, pJobDesc, begin_time);
 	insert_uint32_t(job_desc, pJobDesc, bitflags);
 	insert_char_star(job_desc, pJobDesc, burst_buffer);
-	insert_uint16_t(job_desc, pJobDesc, ckpt_interval);
-	insert_char_star(job_desc, pJobDesc, ckpt_dir);
 	insert_char_star(job_desc, pJobDesc, clusters);
 	insert_char_star(job_desc, pJobDesc, comment);
 	insert_uint16_t_to_bool(job_desc, pJobDesc, contiguous);
@@ -379,6 +411,7 @@ PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 	insert_char_star(job_desc, pJobDesc, script);
 	insert_uint16_t(job_desc, pJobDesc, shared);
 	insert_char_star_star(job_desc, pJobDesc, spank_job_env, spank_job_env_size);
+	insert_char_star(job_desc, pJobDesc, submit_line);
 	insert_uint32_t(job_desc, pJobDesc, task_dist);
 	insert_uint32_t(job_desc, pJobDesc, time_limit);
 	insert_uint32_t(job_desc, pJobDesc, time_min);
@@ -406,11 +439,9 @@ PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 	insert_uint64_t(job_desc, pJobDesc, pn_min_memory);
 	insert_uint32_t(job_desc, pJobDesc, pn_min_tmp_disk);
 	insert_uint32_t(job_desc, pJobDesc, req_switch);
-	// select_jobinfo
 	insert_char_star(job_desc, pJobDesc, std_err);
 	insert_char_star(job_desc, pJobDesc, std_in);
 	insert_char_star(job_desc, pJobDesc, std_out);
-	// insert_uint64_t_star(job_desc, pJobDesc, tres_req_cnt);
 	insert_uint32_t(job_desc, pJobDesc, wait4switch);
 	insert_char_star(job_desc, pJobDesc, wckey);
 
@@ -428,7 +459,6 @@ PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 	insert_uint64_t(job_desc, pJobDesc, fed_siblings_active);
 	insert_uint64_t(job_desc, pJobDesc, fed_siblings_viable);
 	insert_char_star(job_desc, pJobDesc, origin_cluster);
-	insert_uint32_t(job_desc, pJobDesc, pack_job_offset);
 	insert_uint16_t(job_desc, pJobDesc, x11);
 	insert_char_star(job_desc, pJobDesc, x11_magic_cookie);
 	insert_uint16_t(job_desc, pJobDesc, x11_target_port);
@@ -455,15 +485,10 @@ PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 	insert_char_star(job_desc, pJobDesc, x11_target);
 #endif
 
-	PyObject *p_types_module = PyImport_ImportModule("types");
-	PyObject *p_simplenamespace = PyObject_GetAttrString(p_types_module, "SimpleNamespace");
-	Py_DECREF(p_types_module);
-
-	PyObject *new_obj = PyObject_Call(p_simplenamespace, NULL, pJobDesc);
-	Py_DECREF(p_simplenamespace);
-	Py_DECREF(pJobDesc);
-
-	return new_obj;
+#ifdef DEBUG
+	info("[create_job_desc_dict] %s\n", "RETURN");
+#endif
+	return pJobDesc;
 }
 
 /*
@@ -513,7 +538,7 @@ void python_dict_to_environment(PyObject *obj, uint32_t *num_strings_p, char ***
 	if (!PyDict_Check(obj))
 	{
 		const char *type = Py_TYPE(obj)->tp_name;
-		error("job_submit_python: Environment field expected a mapping, instead found a %s", type);
+		error("job_submit/python: Environment field expected a mapping, instead found a %s", type);
 		return;
 	}
 
@@ -560,7 +585,7 @@ void python_dict_to_environment(PyObject *obj, uint32_t *num_strings_p, char ***
 	for (int i = 0; i < PyMapping_Length(remaining_items); ++i)
 	{
 		PyObject *item = PyList_GetItem(remaining_items, i);
-		char *key = PyUnicode_AsUTF8(PyTuple_GetItem(item, 0));
+		const char *key = PyUnicode_AsUTF8(PyTuple_GetItem(item, 0));
 		PyObject *p_value = PyTuple_GetItem(item, 1);
 		PyObject *p_str = PyObject_Str(p_value);
 		Py_DECREF(p_value);
@@ -620,7 +645,7 @@ void python_to_char_star_star(PyObject *obj, uint32_t *num_strings_p, char ***st
 	{
 		PyObject *obj = PySequence_Fast_GET_ITEM(list, i);
 		PyObject *str = PyObject_Str(obj);
-		char *s = PyUnicode_AsUTF8(str);
+		const char *s = PyUnicode_AsUTF8(str);
 
 		(*str_list_p)[i] = xstrdup(s);
 
@@ -634,7 +659,7 @@ void python_to_char_star_star(PyObject *obj, uint32_t *num_strings_p, char ***st
 #define retrieve_char_star(job_desc, dict, name)                      \
 	do                                                                  \
 	{                                                                   \
-		PyObject *o = PyObject_GetAttrString(dict, #name);                \
+		PyObject *o = PyDict_GetItemString(dict, #name);                  \
 		if (o != NULL)                                                    \
 		{                                                                 \
 			if (o == Py_None)                                               \
@@ -643,7 +668,7 @@ void python_to_char_star_star(PyObject *obj, uint32_t *num_strings_p, char ***st
 			}                                                               \
 			else                                                            \
 			{                                                               \
-				char *s = PyUnicode_AsUTF8(o);                                \
+				const char *s = PyUnicode_AsUTF8(o);                          \
 				if (job_desc->name == NULL || strcmp(s, job_desc->name) != 0) \
 				{                                                             \
 					xfree(job_desc->name);                                      \
@@ -656,7 +681,7 @@ void python_to_char_star_star(PyObject *obj, uint32_t *num_strings_p, char ***st
 #define retrieve_char_star_star(job_desc, dict, name, count)          \
 	do                                                                  \
 	{                                                                   \
-		PyObject *o = PyObject_GetAttrString(dict, #name);                \
+		PyObject *o = PyDict_GetItemString(dict, #name);                  \
 		if (o != NULL)                                                    \
 		{                                                                 \
 			python_to_char_star_star(o, &job_desc->count, &job_desc->name); \
@@ -666,29 +691,29 @@ void python_to_char_star_star(PyObject *obj, uint32_t *num_strings_p, char ***st
 #define retrieve_environment_dict(job_desc, dict, name, count)          \
 	do                                                                    \
 	{                                                                     \
-		PyObject *o = PyObject_GetAttrString(dict, #name);                  \
+		PyObject *o = PyDict_GetItemString(dict, #name);                    \
 		if (o != NULL)                                                      \
 		{                                                                   \
 			python_dict_to_environment(o, &job_desc->count, &job_desc->name); \
 			PyDict_DelItemString(dict, #name);                                \
 		}                                                                   \
 	} while (0)
-#define retrieve_int(job_desc, dict, name, noval)      \
-	do                                                   \
-	{                                                    \
-		PyObject *o = PyObject_GetAttrString(dict, #name); \
-		if (o != NULL)                                     \
-		{                                                  \
-			if (o == Py_None)                                \
-			{                                                \
-				job_desc->name = noval;                        \
-			}                                                \
-			else                                             \
-			{                                                \
-				job_desc->name = PyLong_AsUnsignedLong(o);     \
-			}                                                \
-			PyDict_DelItemString(dict, #name);               \
-		}                                                  \
+#define retrieve_int(job_desc, dict, name, noval)    \
+	do                                                 \
+	{                                                  \
+		PyObject *o = PyDict_GetItemString(dict, #name); \
+		if (o != NULL)                                   \
+		{                                                \
+			if (o == Py_None)                              \
+			{                                              \
+				job_desc->name = noval;                      \
+			}                                              \
+			else                                           \
+			{                                              \
+				job_desc->name = PyLong_AsUnsignedLong(o);   \
+			}                                              \
+			PyDict_DelItemString(dict, #name);             \
+		}                                                \
 	} while (0)
 #define retrieve_uint8_t(job_desc, dict, name) retrieve_int(job_desc, dict, name, NO_VAL8)
 #define retrieve_uint16_t(job_desc, dict, name) retrieve_int(job_desc, dict, name, NO_VAL16)
@@ -697,7 +722,7 @@ void python_to_char_star_star(PyObject *obj, uint32_t *num_strings_p, char ***st
 #define retrieve_int_as_bool(job_desc, dict, name, noval) \
 	do                                                      \
 	{                                                       \
-		PyObject *o = PyObject_GetAttrString(dict, #name);    \
+		PyObject *o = PyDict_GetItemString(dict, #name);      \
 		if (o != NULL)                                        \
 		{                                                     \
 			if (o == Py_None)                                   \
@@ -713,15 +738,15 @@ void python_to_char_star_star(PyObject *obj, uint32_t *num_strings_p, char ***st
 	} while (0)
 #define retrieve_uint8_t_as_bool(job_desc, dict, name) retrieve_int_as_bool(job_desc, dict, name, NO_VAL8)
 #define retrieve_uint16_t_as_bool(job_desc, dict, name) retrieve_int_as_bool(job_desc, dict, name, NO_VAL16)
-#define retrieve_time_t(job_desc, dict, name)          \
-	do                                                   \
-	{                                                    \
-		PyObject *o = PyObject_GetAttrString(dict, #name); \
-		if (o != NULL)                                     \
-		{                                                  \
-			job_desc->name = PyLong_AsUnsignedLong(o);       \
-			PyDict_DelItemString(dict, #name);               \
-		}                                                  \
+#define retrieve_time_t(job_desc, dict, name)        \
+	do                                                 \
+	{                                                  \
+		PyObject *o = PyDict_GetItemString(dict, #name); \
+		if (o != NULL)                                   \
+		{                                                \
+			job_desc->name = PyLong_AsUnsignedLong(o);     \
+			PyDict_DelItemString(dict, #name);             \
+		}                                                \
 	} while (0)
 
 /*
@@ -729,6 +754,9 @@ void python_to_char_star_star(PyObject *obj, uint32_t *num_strings_p, char ***st
  */
 void retrieve_job_desc_dict(struct job_descriptor *job_desc, PyObject *pJobDesc)
 {
+#ifdef DEBUG
+	info("[retrieve_job_desc_dict] %s\n", "ENTRY");
+#endif
 	retrieve_char_star(job_desc, pJobDesc, account);
 	retrieve_char_star(job_desc, pJobDesc, acctg_freq);
 	retrieve_char_star(job_desc, pJobDesc, admin_comment);
@@ -741,8 +769,6 @@ void retrieve_job_desc_dict(struct job_descriptor *job_desc, PyObject *pJobDesc)
 	retrieve_time_t(job_desc, pJobDesc, begin_time);
 	retrieve_uint32_t(job_desc, pJobDesc, bitflags);
 	retrieve_char_star(job_desc, pJobDesc, burst_buffer);
-	retrieve_uint16_t(job_desc, pJobDesc, ckpt_interval);
-	retrieve_char_star(job_desc, pJobDesc, ckpt_dir);
 	retrieve_char_star(job_desc, pJobDesc, clusters);
 	retrieve_char_star(job_desc, pJobDesc, comment);
 	retrieve_uint16_t_as_bool(job_desc, pJobDesc, contiguous);
@@ -819,11 +845,9 @@ void retrieve_job_desc_dict(struct job_descriptor *job_desc, PyObject *pJobDesc)
 	retrieve_uint64_t(job_desc, pJobDesc, pn_min_memory);
 	retrieve_uint32_t(job_desc, pJobDesc, pn_min_tmp_disk);
 	retrieve_uint32_t(job_desc, pJobDesc, req_switch);
-	// select_jobinfo
 	retrieve_char_star(job_desc, pJobDesc, std_err);
 	retrieve_char_star(job_desc, pJobDesc, std_in);
 	retrieve_char_star(job_desc, pJobDesc, std_out);
-	// retrieve_uint64_t_star(job_desc, pJobDesc, tres_req_cnt);
 	retrieve_uint32_t(job_desc, pJobDesc, wait4switch);
 	retrieve_char_star(job_desc, pJobDesc, wckey);
 
@@ -841,7 +865,6 @@ void retrieve_job_desc_dict(struct job_descriptor *job_desc, PyObject *pJobDesc)
 	retrieve_uint64_t(job_desc, pJobDesc, fed_siblings_active);
 	retrieve_uint64_t(job_desc, pJobDesc, fed_siblings_viable);
 	retrieve_char_star(job_desc, pJobDesc, origin_cluster);
-	retrieve_uint32_t(job_desc, pJobDesc, pack_job_offset);
 	retrieve_uint16_t(job_desc, pJobDesc, x11);
 	retrieve_char_star(job_desc, pJobDesc, x11_magic_cookie);
 	retrieve_uint16_t(job_desc, pJobDesc, x11_target_port);
@@ -867,6 +890,9 @@ void retrieve_job_desc_dict(struct job_descriptor *job_desc, PyObject *pJobDesc)
 	retrieve_uint32_t(job_desc, pJobDesc, site_factor);
 	retrieve_char_star(job_desc, pJobDesc, x11_target);
 #endif
+#ifdef DEBUG
+	info("[retrieve_job_desc_dict] %s\n", "RETURN");
+#endif
 }
 
 /*
@@ -881,7 +907,7 @@ PyObject *load_script()
 
 	if (pModuleInitial != NULL)
 	{
-		verbose("job_submit_python: Loaded \"%s\"", script_name);
+		info("job_submit/python: Loaded \"%s\"", script_name);
 
 		// Reload the module to ensure live updating the script works
 		PyObject *pModule = PyImport_ReloadModule(pModuleInitial);
@@ -890,7 +916,7 @@ PyObject *load_script()
 		return pModule;
 	}
 
-	error("job_submit_python: Failed to load \"%s\"", script_name);
+	error("job_submit/python: Failed to load \"%s\"", script_name);
 	print_python_error();
 
 	return pModuleInitial;
@@ -901,86 +927,108 @@ PyObject *load_script()
  */
 extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char **err_msg)
 {
+#ifdef DEBUG
+	info("[job_submit] pid=%ld, pyInitialized=%d\n", syscall(__NR_gettid), Py_IsInitialized());
+#endif
 	slurm_mutex_lock(&python_lock);
+	// if (!Py_IsInitialized())
+	py_init();
 
-	PyObject *pModule = load_script();
-	if (pModule != NULL)
+	PyObject *pModule, *pFunc, *pRc, *pJobDesc;
+
+	// PyGILState_STATE gil = PyGILState_Ensure();
+
+	pModule = load_script();
+	if (!pModule)
+		goto slurm_job_submit_error;
+
+	pFunc = PyObject_GetAttrString(pModule, "job_submit");
+	Py_DECREF(pModule);
+	pModule = NULL;
+
+	if (!(pFunc && PyCallable_Check(pFunc)))
 	{
-		PyObject *pFunc = PyObject_GetAttrString(pModule, "job_submit");
-		if (pFunc && PyCallable_Check(pFunc))
-		{
-			PyObject *pJobDesc = create_job_desc_dict(job_desc);
-			PyObject *p_submit_uid = PyLong_FromUnsignedLongLong(submit_uid);
-
-			PyObject *pRc = PyObject_CallFunctionObjArgs(pFunc, pJobDesc, p_submit_uid, NULL);
-			Py_DECREF(p_submit_uid);
-
-			if (pRc != NULL)
-			{
-				if (!PyLong_Check(pRc))
-				{
-					error("job_submit_python: return value of function must be an integer, not %s", Py_TYPE(pRc)->tp_name);
-					Py_DECREF(pRc);
-					Py_DECREF(pJobDesc);
-					Py_DECREF(pFunc);
-					Py_DECREF(pModule);
-					return SLURM_ERROR;
-				}
-				long rc = PyLong_AsLong(pRc);
-				Py_DECREF(pRc);
-
-				retrieve_job_desc_dict(job_desc, pJobDesc);
-				Py_DECREF(pJobDesc);
-
-				if (user_msg)
-				{
-					*err_msg = user_msg;
-					user_msg = NULL;
-				}
-
-				if (rc != SLURM_SUCCESS)
-				{
-					Py_DECREF(pFunc);
-					Py_DECREF(pModule);
-					slurm_mutex_unlock(&python_lock);
-					return rc;
-				}
-			}
-			else
-			{
-				Py_DECREF(pJobDesc);
-				Py_DECREF(pFunc);
-				Py_DECREF(pModule);
-
-				error("job_submit_python: Call failed");
-				print_python_error();
-
-				slurm_mutex_unlock(&python_lock);
-				return SLURM_ERROR;
-			}
-		}
-		else
-		{
-			error("job_submit_python: Cannot find function \"%s\"", "job_submit");
-			print_python_error();
-
-			Py_XDECREF(pFunc);
-			Py_DECREF(pModule);
-			slurm_mutex_unlock(&python_lock);
-			return SLURM_ERROR;
-		}
-		Py_XDECREF(pFunc);
-		Py_DECREF(pModule);
-	}
-	else
-	{
+		error("job_submit/python: Call failed");
 		print_python_error();
-		slurm_mutex_unlock(&python_lock);
-		return SLURM_ERROR;
+		goto slurm_job_submit_error;
 	}
 
+	pJobDesc = create_job_desc_dict(job_desc);
+	PyObject *p_submit_uid = PyLong_FromUnsignedLongLong(submit_uid);
+#ifdef DEBUG
+	info("[job_submit] BEGIN callFunctionObjArgs: %s\n", "job_submit");
+#endif
+	pRc = PyObject_CallFunctionObjArgs(pFunc, pJobDesc, p_submit_uid, NULL);
+#ifdef DEBUG
+	info("[job_submit] END callFunctionObjArgs: %s\n", "job_submit");
+#endif
+	Py_DECREF(pFunc);
+	pFunc = NULL;
+	Py_DECREF(p_submit_uid);
+	p_submit_uid = NULL;
+
+	if (!pRc)
+	{
+		error("job_submit/python: NULL pointer returned from function job_submit");
+		print_python_error();
+		goto slurm_job_submit_error;
+	}
+
+	if (!PyLong_Check(pRc))
+	{
+		error("job_submit/python: return value of function must be an integer, not %s", Py_TYPE(pRc)->tp_name);
+		goto slurm_job_submit_error;
+	}
+
+	if (user_msg)
+	{
+#ifdef DEBUG
+		info("[job_submit] received user_msg\n%s\n", user_msg);
+#endif
+		if (err_msg)
+			*err_msg = user_msg;
+		user_msg = NULL;
+	}
+
+	long rc = PyLong_AsLong(pRc);
+	Py_DECREF(pRc);
+	pRc = NULL;
+
+	if (rc != SLURM_SUCCESS)
+	{
+		error("job_submit/python: non-zero return: %ld", rc);
+		goto slurm_job_submit_error;
+	}
+	retrieve_job_desc_dict(job_desc, pJobDesc);
+	Py_DECREF(pJobDesc);
+	pJobDesc = NULL;
+
+#ifdef DEBUG
+	info("[job_submit] %s\n", "label/slurm_job_submit_success");
+#endif
+	// PyGILState_Release(gil);
+	py_fini();
 	slurm_mutex_unlock(&python_lock);
+#ifdef DEBUG
+	info("[job_submit] %s\n", "SLURM_SUCCESS");
+#endif
 	return SLURM_SUCCESS;
+
+slurm_job_submit_error:
+#ifdef DEBUG
+	info("[job_submit] %s\n", "label/slurm_job_submit_error");
+#endif
+	Py_XDECREF(pModule);
+	Py_XDECREF(pFunc);
+	Py_XDECREF(pJobDesc);
+	Py_XDECREF(pRc);
+	// PyGILState_Release(gil);
+	py_fini();
+	slurm_mutex_unlock(&python_lock);
+#ifdef DEBUG
+	info("[job_submit] %s\n", "SLURM_ERROR");
+#endif
+	return SLURM_ERROR;
 }
 
 extern int job_modify(struct job_descriptor *job_desc, struct job_record *job_ptr, uint32_t submit_uid)
@@ -988,4 +1036,17 @@ extern int job_modify(struct job_descriptor *job_desc, struct job_record *job_pt
 	slurm_mutex_lock(&python_lock);
 	slurm_mutex_unlock(&python_lock);
 	return SLURM_SUCCESS;
+}
+
+// TODO: use unit testing
+int main(int argc, char **argv)
+{
+	init();
+
+	job_desc_msg_t *job_desc = xmalloc(sizeof(job_desc_msg_t));
+	job_submit(job_desc, 0, NULL);
+
+	fini();
+
+	return 0;
 }
