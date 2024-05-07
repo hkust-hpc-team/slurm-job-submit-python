@@ -411,7 +411,6 @@ PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 	insert_char_star(job_desc, pJobDesc, script);
 	insert_uint16_t(job_desc, pJobDesc, shared);
 	insert_char_star_star(job_desc, pJobDesc, spank_job_env, spank_job_env_size);
-	insert_char_star(job_desc, pJobDesc, submit_line);
 	insert_uint32_t(job_desc, pJobDesc, task_dist);
 	insert_uint32_t(job_desc, pJobDesc, time_limit);
 	insert_uint32_t(job_desc, pJobDesc, time_min);
@@ -483,6 +482,10 @@ PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 #if SLURM_VERSION_NUMBER >= SLURM_VERSION_NUM(19, 5, 0)
 	insert_uint32_t(job_desc, pJobDesc, site_factor);
 	insert_char_star(job_desc, pJobDesc, x11_target);
+#endif
+
+#if SLURM_VERSION_NUMBER >= SLURM_VERSION_NUM(21, 0, 0)
+	insert_char_star(job_desc, pJobDesc, submit_line);
 #endif
 
 #ifdef DEBUG
