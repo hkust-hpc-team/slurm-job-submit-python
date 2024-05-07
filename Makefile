@@ -47,7 +47,7 @@ endif
 ifndef SLURM_CONF_DIR
 ifdef SLURM_CONF
 SLURM_CONF_AUTODETECT="(autodetect)"
-SLURM_CONF_DIR=$(shell $$(dirname $(SLURM_CONF)))
+SLURM_CONF_DIR=$(shell echo $$(dirname $(SLURM_CONF)))
 else
 SLURM_CONF_AUTODETECT="(default)"
 SLURM_CONF_DIR=/etc/slurm
