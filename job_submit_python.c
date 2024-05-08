@@ -157,7 +157,7 @@ int py_fini(void)
 #ifdef DEBUG
 	info("[py_fini] pid=%ld\n", syscall(__NR_gettid));
 #endif
-	Py_Finalize();
+	Py_FinalizeEx();
 	return SLURM_SUCCESS;
 }
 
@@ -264,7 +264,10 @@ PyObject *char_star_star_to_python_dict(uint32_t num_strings, char **str_list)
 		if (job_desc->name != NULL)                                         \
 			insert_object(dict, #name, PyUnicode_FromString(job_desc->name)); \
 		else                                                                \
+		{                                                                   \
 			insert_object(dict, #name, Py_None);                              \
+			Py_INCREF(Py_None);                                               \
+		}                                                                   \
 	} while (0)
 #define insert_char_star_star(job_desc, dict, name, count)                                   \
 	do                                                                                         \
@@ -272,7 +275,10 @@ PyObject *char_star_star_to_python_dict(uint32_t num_strings, char **str_list)
 		if (job_desc->name != NULL)                                                              \
 			insert_object(dict, #name, char_star_star_to_python(job_desc->count, job_desc->name)); \
 		else                                                                                     \
+		{                                                                                        \
 			insert_object(dict, #name, Py_None);                                                   \
+			Py_INCREF(Py_None);                                                                    \
+		}                                                                                        \
 	} while (0)
 #define insert_environment_dict(job_desc, dict, name, count)                                      \
 	do                                                                                              \
@@ -280,7 +286,10 @@ PyObject *char_star_star_to_python_dict(uint32_t num_strings, char **str_list)
 		if (job_desc->name != NULL)                                                                   \
 			insert_object(dict, #name, char_star_star_to_python_dict(job_desc->count, job_desc->name)); \
 		else                                                                                          \
+		{                                                                                             \
 			insert_object(dict, #name, Py_None);                                                        \
+			Py_INCREF(Py_None);                                                                         \
+		}                                                                                             \
 	} while (0)
 #define insert_uint8_t(job_desc, dict, name)                               \
 	do                                                                       \
@@ -346,7 +355,7 @@ PyObject *char_star_star_to_python_dict(uint32_t num_strings, char **str_list)
 PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 {
 #ifdef DEBUG
-	info("[create_job_desc_dict] %s\n", "ENTRY");
+	info("[create_job_desc_dict] %s", "ENTRY");
 #endif
 	PyObject *pJobDesc = PyDict_New();
 
@@ -358,7 +367,6 @@ PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 	insert_uint32_t(job_desc, pJobDesc, alloc_sid);
 	insert_char_star_star(job_desc, pJobDesc, argv, argc);
 	insert_char_star(job_desc, pJobDesc, array_inx);
-	// insert_char_star(job_desc, pJobDesc, array_bitmap); // void*
 	insert_time_t(job_desc, pJobDesc, begin_time);
 	insert_uint32_t(job_desc, pJobDesc, bitflags);
 	insert_char_star(job_desc, pJobDesc, burst_buffer);
@@ -470,7 +478,6 @@ PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 	insert_char_star(job_desc, pJobDesc, batch_features);
 	insert_char_star(job_desc, pJobDesc, cpus_per_tres);
 	insert_char_star(job_desc, pJobDesc, mem_per_tres);
-	// insert_void_star(job_desc, pJobDesc, script_buf);  // void*
 	insert_char_star(job_desc, pJobDesc, tres_bind);
 	insert_char_star(job_desc, pJobDesc, tres_freq);
 	insert_char_star(job_desc, pJobDesc, tres_per_job);
@@ -489,7 +496,7 @@ PyObject *create_job_desc_dict(struct job_descriptor *job_desc)
 #endif
 
 #ifdef DEBUG
-	info("[create_job_desc_dict] %s\n", "RETURN");
+	info("[create_job_desc_dict] %s", "RETURN");
 #endif
 	return pJobDesc;
 }
@@ -758,7 +765,7 @@ void python_to_char_star_star(PyObject *obj, uint32_t *num_strings_p, char ***st
 void retrieve_job_desc_dict(struct job_descriptor *job_desc, PyObject *pJobDesc)
 {
 #ifdef DEBUG
-	info("[retrieve_job_desc_dict] %s\n", "ENTRY");
+	info("[retrieve_job_desc_dict] %s", "ENTRY");
 #endif
 	retrieve_char_star(job_desc, pJobDesc, account);
 	retrieve_char_star(job_desc, pJobDesc, acctg_freq);
@@ -768,7 +775,6 @@ void retrieve_job_desc_dict(struct job_descriptor *job_desc, PyObject *pJobDesc)
 	retrieve_uint32_t(job_desc, pJobDesc, alloc_sid);
 	retrieve_char_star_star(job_desc, pJobDesc, argv, argc);
 	retrieve_char_star(job_desc, pJobDesc, array_inx);
-	// retrieve_char_star(job_desc, pJobDesc, array_bitmap); // void*
 	retrieve_time_t(job_desc, pJobDesc, begin_time);
 	retrieve_uint32_t(job_desc, pJobDesc, bitflags);
 	retrieve_char_star(job_desc, pJobDesc, burst_buffer);
@@ -880,7 +886,6 @@ void retrieve_job_desc_dict(struct job_descriptor *job_desc, PyObject *pJobDesc)
 	retrieve_char_star(job_desc, pJobDesc, batch_features);
 	retrieve_char_star(job_desc, pJobDesc, cpus_per_tres);
 	retrieve_char_star(job_desc, pJobDesc, mem_per_tres);
-	// retrieve_void_star(job_desc, pJobDesc, script_buf);  // void*
 	retrieve_char_star(job_desc, pJobDesc, tres_bind);
 	retrieve_char_star(job_desc, pJobDesc, tres_freq);
 	retrieve_char_star(job_desc, pJobDesc, tres_per_job);
@@ -893,8 +898,13 @@ void retrieve_job_desc_dict(struct job_descriptor *job_desc, PyObject *pJobDesc)
 	retrieve_uint32_t(job_desc, pJobDesc, site_factor);
 	retrieve_char_star(job_desc, pJobDesc, x11_target);
 #endif
+
+#if SLURM_VERSION_NUMBER >= SLURM_VERSION_NUM(21, 0, 0)
+	retrieve_char_star(job_desc, pJobDesc, submit_line);
+#endif
+
 #ifdef DEBUG
-	info("[retrieve_job_desc_dict] %s\n", "RETURN");
+	info("[retrieve_job_desc_dict] %s", "RETURN");
 #endif
 }
 
@@ -912,11 +922,12 @@ PyObject *load_script()
 	{
 		info("job_submit/python: Loaded \"%s\"", script_name);
 
+		//! Was reloading whole python anyway due to slurm threading issue
 		// Reload the module to ensure live updating the script works
-		PyObject *pModule = PyImport_ReloadModule(pModuleInitial);
-		Py_DECREF(pModuleInitial);
+		// PyObject *pModule = PyImport_ReloadModule(pModuleInitial);
+		// Py_DECREF(pModuleInitial);
 
-		return pModule;
+		return pModuleInitial;
 	}
 
 	error("job_submit/python: Failed to load \"%s\"", script_name);
@@ -934,12 +945,10 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char
 	info("[job_submit] pid=%ld, pyInitialized=%d\n", syscall(__NR_gettid), Py_IsInitialized());
 #endif
 	slurm_mutex_lock(&python_lock);
-	// if (!Py_IsInitialized())
-	py_init();
+	if (!Py_IsInitialized())
+		py_init();
 
-	PyObject *pModule, *pFunc, *pRc, *pJobDesc;
-
-	// PyGILState_STATE gil = PyGILState_Ensure();
+	PyObject *pModule = NULL, *pFunc = NULL, *pRc = NULL, *pJobDesc = NULL;
 
 	pModule = load_script();
 	if (!pModule)
@@ -959,11 +968,11 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char
 	pJobDesc = create_job_desc_dict(job_desc);
 	PyObject *p_submit_uid = PyLong_FromUnsignedLongLong(submit_uid);
 #ifdef DEBUG
-	info("[job_submit] BEGIN callFunctionObjArgs: %s\n", "job_submit");
+	info("[job_submit] BEGIN callFunctionObjArgs: %s", "job_submit");
 #endif
 	pRc = PyObject_CallFunctionObjArgs(pFunc, pJobDesc, p_submit_uid, NULL);
 #ifdef DEBUG
-	info("[job_submit] END callFunctionObjArgs: %s\n", "job_submit");
+	info("[job_submit] END callFunctionObjArgs: %s", "job_submit");
 #endif
 	Py_DECREF(pFunc);
 	pFunc = NULL;
@@ -986,7 +995,7 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char
 	if (user_msg)
 	{
 #ifdef DEBUG
-		info("[job_submit] received user_msg\n%s\n", user_msg);
+		info("[job_submit] received user_msg\n%s", user_msg);
 #endif
 		if (err_msg)
 			*err_msg = user_msg;
@@ -1007,29 +1016,27 @@ extern int job_submit(struct job_descriptor *job_desc, uint32_t submit_uid, char
 	pJobDesc = NULL;
 
 #ifdef DEBUG
-	info("[job_submit] %s\n", "label/slurm_job_submit_success");
+	info("[job_submit] %s", "label/slurm_job_submit_success");
 #endif
-	// PyGILState_Release(gil);
 	py_fini();
 	slurm_mutex_unlock(&python_lock);
 #ifdef DEBUG
-	info("[job_submit] %s\n", "SLURM_SUCCESS");
+	info("[job_submit] %s", "SLURM_SUCCESS");
 #endif
 	return SLURM_SUCCESS;
 
 slurm_job_submit_error:
 #ifdef DEBUG
-	info("[job_submit] %s\n", "label/slurm_job_submit_error");
+	info("[job_submit] %s", "label/slurm_job_submit_error");
 #endif
 	Py_XDECREF(pModule);
 	Py_XDECREF(pFunc);
 	Py_XDECREF(pJobDesc);
 	Py_XDECREF(pRc);
-	// PyGILState_Release(gil);
 	py_fini();
 	slurm_mutex_unlock(&python_lock);
 #ifdef DEBUG
-	info("[job_submit] %s\n", "SLURM_ERROR");
+	info("[job_submit] %s", "SLURM_ERROR");
 #endif
 	return SLURM_ERROR;
 }
@@ -1046,8 +1053,13 @@ int main(int argc, char **argv)
 {
 	init();
 
-	job_desc_msg_t *job_desc = xmalloc(sizeof(job_desc_msg_t));
-	job_submit(job_desc, 0, NULL);
+	for (int i = 0; i < 1000; i++)
+	{
+		job_desc_msg_t *job_desc = xmalloc(sizeof(job_desc_msg_t));
+		job_submit(job_desc, 0, NULL);
+		printf("Iter %d\n", i);
+		xfree(job_desc);
+	}
 
 	fini();
 
