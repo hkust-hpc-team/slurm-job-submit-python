@@ -1,5 +1,7 @@
 *.log
-logs/
 *.out
+*.pyc
 *.so
 .vscode/
+__pycache__
+logs/
