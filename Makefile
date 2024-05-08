@@ -63,12 +63,14 @@ PYTHON_CONFIG?=python$(PYTHON_VERSION)-config
 PYTHON_INCLUDE_FLAGS=$(shell $(PYTHON_CONFIG) --includes)
 PYTHON_LIBRARY_FLAGS=$(shell $(PYTHON_CONFIG) --libs) -lpython$(PYTHON_VERSION)
 SLURM_SRC_DIR=$(PWD)/slurm
+INCLUDES=-I$(SLURM_INCLUDE_DIR) -I$(SLURM_SRC_DIR) $(PYTHON_INCLUDE_FLAGS)
+LIBS=$(PYTHON_LIBRARY_FLAGS) $(SLURM_LIBRARY_FLAGS)
 
 CC=gcc
 
 ifdef DEBUG
 DEBUG_BUILD=Yes
-CFLAGS=-g -O0 -DDEBUG -Wall -lslurmfull-${SLURM_VERSION}
+CFLAGS=-g -O0 -DDEBUG -Wall
 else
 DEBUG_BUILD=No
 CFLAGS=-O3 -Wfatal-errors
@@ -77,43 +79,55 @@ CFLAGS+=-fPIC -std=c99 -DDEFAULT_SCRIPT_DIR=\"$(SLURM_CONF_DIR)\"
 
 SOURCES=job_submit_python.c
 OUTPUT_LIBRARY=job_submit_python.so
-TEST_BINARY=job_submit_python.out
+TEST_BINARY=test.out
 
-$(OUTPUT_LIBRARY): $(SOURCES) slurm/config.h
+$(OUTPUT_LIBRARY): $(SOURCES) slurm/git-tag-$(SLURM_SOURCE_TAG) Makefile
 	$(MAKE) summary
-	$(CC) $(SOURCES) -o $@ -shared -I $(SLURM_INCLUDE_DIR) -I $(SLURM_SRC_DIR) $(PYTHON_INCLUDE_FLAGS) $(PYTHON_LIBRARY_FLAGS) $(SLURM_LIBRARY_FLAGS) $(CFLAGS)
+	$(CC) $(SOURCES) -o $@ -shared $(CFLAGS) $(INCLUDES) $(LIBS)
 
-$(TEST_BINARY): $(SOURCES) slurm/config.h
+$(TEST_BINARY): LIBS+=-lslurmfull-${SLURM_VERSION}
+$(TEST_BINARY): $(SOURCES) slurm/git-tag-$(SLURM_SOURCE_TAG) Makefile
 	$(MAKE) summary
-	$(CC) $(SOURCES) -o $@ -I $(SLURM_INCLUDE_DIR) -I $(SLURM_SRC_DIR) $(PYTHON_INCLUDE_FLAGS) $(PYTHON_LIBRARY_FLAGS) $(SLURM_LIBRARY_FLAGS) $(CFLAGS)
+	$(CC) $(SOURCES) -o $@ $(CFLAGS) $(INCLUDES) $(LIBS)
 
-summary:
-	@echo ========= Summary =========
-	@echo Python API Version: $(PYTHON_VERSION) $(PYTHON_VERSION_AUTODETECT)
-	@echo SLURM slurmctld API Version: $(SLURM_VERSION) $(SLURM_VERSION_AUTODETECT)
-	@echo SLURM source tag: $(SLURM_SOURCE_TAG) $(SLURM_SOURCE_TAG_AUTODETECT)
-	@echo SLURM slurm.conf directory: $(SLURM_CONF_DIR) $(SLURM_CONF_AUTODETECT)
-	@echo Debug: $(DEBUG_BUILD)
+summary: slurm/git-tag-$(SLURM_SOURCE_TAG)
+	@echo [I] ========= Summary =========
+	@echo [I] Python API Version: $(PYTHON_VERSION) $(PYTHON_VERSION_AUTODETECT)
+	@echo [I] SLURM slurmctld API Version: $(SLURM_VERSION) $(SLURM_VERSION_AUTODETECT)
+	@echo [I] SLURM source tag: $(SLURM_SOURCE_TAG) $(SLURM_SOURCE_TAG_AUTODETECT)
+	@echo [I] SLURM slurm.conf directory: $(SLURM_CONF_DIR) $(SLURM_CONF_AUTODETECT)
+	@echo [I] Debug: $(DEBUG_BUILD)
+	@echo [I] CC: $(CC)
+	@echo [I] CFLAGS: $(CFLAGS)
 	@echo
 	@sleep 3
 
-slurm/config.h: slurm/src slurm/git-tag-$(SLURM_SOURCE_TAG)
+slurm/config.h: slurm/git-tag-$(SLURM_SOURCE_TAG)
+	cd slurm && ./configure -q && touch config.h || \
+		( echo -e "Error: SLURM configure failed, please check log at $(SLURM_SRC_DIR)/config.log\n"; exit 1 )
 
-slurm/git-tag-$(SLURM_SOURCE_TAG): slurm/src
+slurm/git-tag-$(SLURM_SOURCE_TAG): slurm/TAGS
 	cd slurm && \
-	if [ "$$(git describe --tags)" != "$(SLURM_SOURCE_TAG)" ] || [ ! -f config.h ]; then \
-		git add . && git reset --hard && git checkout $(SLURM_SOURCE_TAG) -f && ./configure; \
+	if [[ ! "$$(git describe --tags)" -eq "$(SLURM_SOURCE_TAG)" ]] || [[ ! -f ./config.h ]]; then \
+		echo "git checkout $(SLURM_SOURCE_TAG) -f"; \
+		git add . && git reset --hard && git checkout $(SLURM_SOURCE_TAG) -f; \
+		touch slurm/git-tag-$(SLURM_SOURCE_TAG); \
+		$(MAKE) slurm/config.h; \
 	fi
-	touch $@
 
-slurm/src: .gitmodules
-	git submodule update --init
-	$(MAKE)
+slurm/TAGS: .gitmodules
+	if [[ ! -f slurm/TAGS ]]; then \
+		echo "SLURM source is not checked out in submodule."; \
+		echo "Initializing SLURM submodule..."; \
+		git submodule update --init; \
+		cd slurm && git tag -l --sort=-creatordate > TAGS; \
+		echo -e "\nError: Makefile target changed after submodule init, please rerun make.\n"; exit 1; \
+	fi
 
 clean:
 	-rm -f $(OUTPUT_LIBRARY) $(TEST_BINARY)
 
-dist-clean:
+distclean:
 	-rm -f $(OUTPUT_LIBRARY) $(TEST_BINARY)
 	-git submodule deinit --all -f
 
