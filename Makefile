@@ -7,7 +7,7 @@ SLURM_VERSION?=autodetect # e.g. 23.02.7 ; if not specify, detected using slurmc
 SLURM_SOURCE_TAG?=autodetect # e.g. slurm-23-02-7-1 ; if not specify, will attempt select from source
 SLURM_CONF_DIR?=autodetect # default: /etc/slurm ; if not specify, will attempt infer from SLURM_CONF before default
 SLURM_INCLUDE_DIR?=/usr/include/slurm
-SLURM_PLUGIN_INSTALL_DIR?=/usr/lib64/slurm/
+SLURM_PLUGIN_INSTALL_DIR?=/usr/lib64/slurm
 #*set for debugging
 DEBUG?=
 

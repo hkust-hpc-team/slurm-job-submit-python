@@ -23,8 +23,8 @@
 
 #include <Python.h>
 
-#include "slurm/slurm.h"
-#include "slurm/slurm_errno.h"
+#include <slurm.h>
+#include <slurm_errno.h>
 
 #include "src/common/read_config.h"
 #include "src/common/xstring.h"
