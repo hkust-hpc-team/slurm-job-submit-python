@@ -5,6 +5,7 @@ PYTHON_PATH=/usr/bin/python3 # use system python3
 PYTHON_VERSION?=autodetect # e.g. 3.9 ; if not specify, try autodetect 
 SLURM_VERSION?=autodetect # e.g. 23.02.7 ; if not specify, detected using slurmctld -V
 SLURM_SOURCE_TAG?=autodetect # e.g. slurm-23-02-7-1 ; if not specify, will attempt select from source
+SLURM_DOT_SLASH_CONFIGURE_FLAGS?=--enable-pam --enable-really-no-cray --enable-shared --enable-x11 --disable-static --disable-debug --disable-salloc-background --disable-partial_attach --with-oneapi=no --with-shared-libslurm --without-rpath # Default for rocky 9.3.0
 SLURM_CONF_DIR?=autodetect # default: /etc/slurm ; if not specify, will attempt infer from SLURM_CONF before default
 SLURM_INCLUDE_DIR?=/usr/include/slurm
 SLURM_PLUGIN_INSTALL_DIR?=/usr/lib64/slurm
@@ -34,7 +35,7 @@ ifdef SLURM_SOURCE_TAG
 SLURM_VERSION=$(shell echo $(SLURM_SOURCE_TAG) | grep -o '^slurm-[0-9]\+-[0-9]\+-[0-9]\+-[0-9]\+$$' | cut -d "-" -f 2-4 | tr "-" "." )
 else
 SLURM_VERSION_AUTODETECT="(autodetect, EXPERIMENTAL)"
-SLURM_VERSION=$(shell slurmctld -V | grep -o '^slurm [0-9]\+\.[0-9]\+\.[0-9]\+$$' | cut -d " " -f 2)
+SLURM_VERSION=$(shell srun --version | grep -o '^slurm [0-9]\+\.[0-9]\+\.[0-9]\+$$' | cut -d " " -f 2)
 endif
 endif
 
@@ -70,9 +71,11 @@ CC=gcc
 
 ifdef DEBUG
 DEBUG_BUILD=Yes
+DEBUG_TARGETS=Makefile
 CFLAGS=-g -O0 -DDEBUG -Wall
 else
 DEBUG_BUILD=No
+DEBUG_TARGETS=
 CFLAGS=-O3 -Wfatal-errors
 endif
 CFLAGS+=-fPIC -std=c99 -DDEFAULT_SCRIPT_DIR=\"$(SLURM_CONF_DIR)\"
@@ -81,7 +84,7 @@ SOURCES=job_submit_python.c
 OUTPUT_LIBRARY=job_submit_python.so
 TEST_BINARY=test.out
 
-$(OUTPUT_LIBRARY): $(SOURCES) slurm/git-tag-$(SLURM_SOURCE_TAG) Makefile
+$(OUTPUT_LIBRARY): $(SOURCES) slurm/git-tag-$(SLURM_SOURCE_TAG) $(DEBUG_TARGETS)
 	$(MAKE) summary
 	$(CC) $(SOURCES) -o $@ -shared $(CFLAGS) $(INCLUDES) $(LIBS)
 
@@ -90,7 +93,7 @@ $(TEST_BINARY): $(SOURCES) slurm/git-tag-$(SLURM_SOURCE_TAG) Makefile
 	$(MAKE) summary
 	$(CC) $(SOURCES) -o $@ $(CFLAGS) $(INCLUDES) $(LIBS)
 
-summary: slurm/git-tag-$(SLURM_SOURCE_TAG)
+summary: slurm/config.h
 	@echo [I] ========= Summary =========
 	@echo [I] Python API Version: $(PYTHON_VERSION) $(PYTHON_VERSION_AUTODETECT)
 	@echo [I] SLURM slurmctld API Version: $(SLURM_VERSION) $(SLURM_VERSION_AUTODETECT)
@@ -103,7 +106,7 @@ summary: slurm/git-tag-$(SLURM_SOURCE_TAG)
 	@sleep 3
 
 slurm/config.h: slurm/git-tag-$(SLURM_SOURCE_TAG)
-	cd slurm && ./configure -q && touch config.h || \
+	cd slurm && ./configure $(SLURM_DOT_SLASH_CONFIGURE_FLAGS) -q && touch config.h || \
 		( echo -e "Error: SLURM configure failed, please check log at $(SLURM_SRC_DIR)/config.log\n"; exit 1 )
 
 slurm/git-tag-$(SLURM_SOURCE_TAG): slurm/TAGS
@@ -111,9 +114,8 @@ slurm/git-tag-$(SLURM_SOURCE_TAG): slurm/TAGS
 	if [[ ! "$$(git describe --tags)" -eq "$(SLURM_SOURCE_TAG)" ]] || [[ ! -f ./config.h ]]; then \
 		echo "git checkout $(SLURM_SOURCE_TAG) -f"; \
 		git add . && git reset --hard && git checkout $(SLURM_SOURCE_TAG) -f; \
-		touch slurm/git-tag-$(SLURM_SOURCE_TAG); \
-		$(MAKE) slurm/config.h; \
 	fi
+	touch slurm/git-tag-$(SLURM_SOURCE_TAG)
 
 slurm/TAGS: .gitmodules
 	if [[ ! -f slurm/TAGS ]]; then \
@@ -131,7 +133,11 @@ distclean:
 	-rm -f $(OUTPUT_LIBRARY) $(TEST_BINARY)
 	-git submodule deinit --all -f
 
-install: $(OUTPUT_LIBRARY)
+install: summary $(OUTPUT_LIBRARY)
+	if [[ ! -f $(OUTPUT_LIBRARY) ]]; then \
+		echo "Error: $(OUTPUT_LIBRARY) not found, please `make` first."; \
+		exit 1; \
+	fi
 	install $(OUTPUT_LIBRARY) $(SLURM_PLUGIN_INSTALL_DIR)
 
 test:
